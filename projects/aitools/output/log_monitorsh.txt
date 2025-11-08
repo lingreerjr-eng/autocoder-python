@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+#
+# Simple real‑time log monitor with regex filtering and optional email alerts.
+# Works on Linux/macOS with `mail` or `sendmail` installed.
+#
+# Usage:
+#   ./log_monitor.sh -f /var/log/auth.log -r "Failed password" -e admin@example.com
+#   ./log_monitor.sh -f myapp.log -r "ERROR|WARN" -j matches.json
+
+set -euo pipefail
+
+print_usage() {
+    cat <<EOF
+Usage: $0 -f LOGFILE -r REGEX [options]
+
+Required:
+  -f, --file          Path to the log file to monitor
+  -r, --regex         PCRE pattern to match (e.g., "Failed password|error")
+
+Optional:
+  -e, --email EMAIL   Email address to send alerts to
+  -j, --json FILE     Write matching lines as JSON array to FILE
+  -h, --help          Show this help
+EOF
+    exit 1
+}
+
+# Default values
+EMAIL=""
+JSON_OUT=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        -f|--file)
+            LOGFILE="$2"; shift; shift;;
+        -r|--regex)
+            REGEX="$2"; shift; shift;;
+        -e|--email)
+            EMAIL="$2"; shift; shift;;
+        -j|--json)
+            JSON_OUT="$2"; shift; shift;;
+        -h|--help)
+            print_usage;;
+        *)
+            echo "Unknown option: $1"
+            print_usage;;
+    esac
+done
+
+# Validate required args
+if [[ -z "${LOGFILE:-}" || -z "${REGEX:-}" ]]; then
+    echo "Error: --file and --regex are required."
+    print_usage
+fi
+
+if [[ ! -f "$LOGFILE" ]]; then
+    echo "Error: Log file $LOGFILE does not exist."
+    exit 1
+fi
+
+# Function to send email alert
+send_alert() {
+    local line="$1"
+    if [[ -n "$EMAIL" ]]; then
+        echo -e "Subject: [LogMonitor] Match found\n\n$line" | sendmail "$EMAIL"
+    fi
+}
+
+# If JSON output requested, initialise file
+if [[ -n "$JSON_OUT" ]]; then
+    echo "[]" > "$JSON_OUT"
+fi
+
+# Monitor the file
+tail -F "$LOGFILE" | while IFS= read -r line; do
+    if [[ "$line" =~ $REGEX ]]; then
+        timestamp="$(date --iso-8601=seconds)"
+        echo "[$timestamp] MATCH: $line"
+
+        # Email alert
+        send_alert "$line"
+
+        # JSON output
+        if [[ -n "$JSON_OUT" ]]; then
+            # Append JSON object (simple, not robust for special chars)
+            jq --arg t "$timestamp" --arg l "$line" \
+               '. += [{timestamp: $t, line: $l}]' "$JSON_OUT" > "${JSON_OUT}.tmp" && mv "${JSON_OUT}.tmp" "$JSON_OUT"
+        fi
+    fi
+done

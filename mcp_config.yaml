@@ -1,0 +1,16 @@
+tools:
+  db.users.count:
+    kind: sqlite
+    path: data/app.db
+    query: "SELECT COUNT(*) FROM users;"
+  http.get.github:
+    kind: http_get
+    base: "https://api.github.com"
+  http.post.echo:
+    kind: http_post
+    url: "https://httpbin.org/post"
+    json:
+      hello: world
+  docs.read.readme:
+    kind: doc_read
+    path: README.md
